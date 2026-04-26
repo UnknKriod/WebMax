@@ -234,6 +234,21 @@ class UpdateChatMembers():
         return as_camel_dict(self)
 
 @dataclass
+class FetchHistoryPayload:
+    chat_id: int
+    from_time: int
+    forward: int = 0
+    backward: int = 30
+    get_messages: bool = True
+
+    def to_dict(self) -> dict:
+        # from_time -> from
+        d = as_camel_dict(self)
+        if 'fromTime' in d:
+            d['from'] = d.pop('fromTime')
+        return d
+
+@dataclass
 class CloseAllSessions():
     def to_dict(self) -> dict:
         return {}

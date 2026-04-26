@@ -60,33 +60,54 @@ class FileAttach:
     ):
         pass
 
+from typing import Optional
+
 class MessageLink:
     def __init__(
         self,
         chat_id: int,
-        message_id: int,
-        type: str
+        type: str,
+        message_id: Optional[str] = None,
+        forwarded_message: Optional['Message'] = None,
     ):
         self.chat_id = chat_id
         self.message_id = message_id
         self.type = type
+        self.forwarded_message = forwarded_message
 
-    @staticmethod
-    def from_raw_data(raw_data: dict[str]) -> 'MessageLink':
+    @classmethod
+    def from_raw_data(cls, raw_data: dict, client=None) -> 'MessageLink':
+        link_type = raw_data.get('type')
         chat_id = raw_data.get('chatId')
-        message_id = raw_data.get('messageId')
-        type = raw_data.get('type')
 
-        return MessageLink(
-            chat_id=chat_id,
-            message_id=message_id,
-            type=type
-        )
+        if link_type == 'FORWARD' and 'message' in raw_data:
+            # Вложенное сообщение
+            original_msg_data = raw_data['message']
+            forwarded_msg = Message.from_raw_data(
+                raw_data=original_msg_data,
+                chat_id=chat_id,
+                client=client
+            )
+            return cls(
+                chat_id=chat_id,
+                type=link_type,
+                forwarded_message=forwarded_msg
+            )
+        else:
+            # Обычный REPLY или другой тип
+            message_id = raw_data.get('messageId')
+            return cls(
+                chat_id=chat_id,
+                type=link_type,
+                message_id=message_id
+            )
 
     def __repr__(self) -> str:
-        return f'MessageLink(chat_id={self.chat_id!r}, message_id={self.message_id!r}, type={self.type!r})'
+        return f'MessageLink(chat_id={self.chat_id!r}, message_id={self.message_id!r}, type={self.type!r}, forwarded_message={self.forwarded_message!r})'
 
     def __str__(self) -> str:
+        if self.type == 'FORWARD' and self.forwarded_message:
+            return f'Forward of message {self.forwarded_message.id} from {self.forwarded_message.sender_id}'
         return f'MessageLink of message {self.message_id} from {self.chat_id}: {self.type}'
 
 class Message:
@@ -145,7 +166,7 @@ class Message:
 
         link = raw_data.get('link')
         if link:
-            link = MessageLink.from_raw_data(link)
+            link = MessageLink.from_raw_data(link, client=client)
 
         return Message(
             client=client,

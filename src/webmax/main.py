@@ -6,6 +6,8 @@ from .api import ApiMixin
 from .auth import AuthMixin
 from .database.db import Database
 from .handlers import HandlersMixin
+from .rate_limiter import RateLimiter
+from .static import RATE_LIMITS, DEFAULT_RATE_LIMIT
 from .websocket import WebsocketMixin
 from .utils import credentials_utils
 from .exceptions import NotAuthorizedError
@@ -27,6 +29,7 @@ class WebMaxClient(ApiMixin, AuthMixin, WebsocketMixin, HandlersMixin):
     '''
 
     def __init__(self, session_name: str, phone: str | None = None):
+        super().__init__()
         self.session_name = session_name
         self.uri = 'wss://ws-api.oneme.ru/websocket'
         self.headers = {
@@ -48,6 +51,11 @@ class WebMaxClient(ApiMixin, AuthMixin, WebsocketMixin, HandlersMixin):
         self._tasks = []
         self._recv_queue = asyncio.Queue()
         self._response_waiters: Dict[int, asyncio.Future] = {}
+
+        self.rate_limiters = {}
+        for opcode, limit in RATE_LIMITS.items():
+            self.rate_limiters[opcode] = RateLimiter(limit)
+        self.default_rate_limiter = RateLimiter(DEFAULT_RATE_LIMIT)
 
     async def start(self, device_name: str = 'Chrome', device_version: str = 'Linux'):
         '''

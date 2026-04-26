@@ -1,0 +1,2 @@
+class NeedRestartError(Exception):
+    pass

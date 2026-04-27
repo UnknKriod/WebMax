@@ -8,7 +8,7 @@ import websockets
 from .errors import NeedRestartError
 from .rate_limiter import RateLimiter
 from .static import MessageStatus, Opcode, ChatActions
-from .entities import Message, ChatAction
+from .entities import Message, ChatAction, User
 from .exceptions import ApiError
 
 class WebsocketMixin:
@@ -39,13 +39,10 @@ class WebsocketMixin:
 				else:
 					await self._recv_queue.put(response)
 			except websockets.ConnectionClosedError:
-				# Соединение закрыто. Добавляем небольшую задержку перед повторным попыткам.
 				await asyncio.sleep(0.1)
 			except asyncio.CancelledError:
-				# Корректное завершение задачи
 				break
 			except Exception as e:
-				# Логируем ошибку и добавляем задержку для предотвращения busy-loop
 				print(f"⚠️ Ошибка в message_receiver: {e}")
 				await asyncio.sleep(0.1)
 
@@ -56,7 +53,6 @@ class WebsocketMixin:
 		"""
 		while True:
 			try:
-				# Используем timeout для предотвращения busy-waiting при пустой очереди
 				response = await asyncio.wait_for(self._recv_queue.get(), timeout=1.0)
 				cmd = response.get('cmd')
 				opcode = response.get('opcode')
@@ -66,11 +62,18 @@ class WebsocketMixin:
 					await self.notif_message(payload)
 				elif opcode == Opcode.NOTIF_CHAT_ACTION:
 					await self.notif_chat_action(payload)
+				elif opcode == Opcode.PING:
+					await self.websocket.send(json.dumps({
+						'ver': self.ver,
+						'cmd': 0,
+						'seq': self.seq,
+						'opcode': Opcode.PING,
+						'payload': payload
+					}))
+					self.seq += 1
 			except asyncio.TimeoutError:
-				# Очередь пуста — просто продолжаем цикл с минимальной нагрузкой
 				continue
 			except asyncio.CancelledError:
-				# Корректное завершение задачи
 				break
 			except Exception as e:
 				print(f"⚠️ Ошибка в action_handler: {e}")
@@ -82,14 +85,18 @@ class WebsocketMixin:
 		raw_data['chat_id'] = chat_id
 		message = Message.from_raw_data(raw_data=raw_data, chat_id=chat_id, client=self)
 
-		chat = self.chats.get(chat_id)
-
-		if message.sender is None:
-			return
-
-		if not (message.sender.id in self.contacts):
-			await self.get_contacts_info(contact_ids=[message.sender.id])
-		contact = self.contacts.get(message.sender.id)
+		# Получение имени отправителя через батчированный механизм (без блокировок)
+		if message.sender is None and message.sender_id is not None:
+			sender_name = await self.get_user_name(message.sender_id)
+			if message.sender_id not in self.contacts:
+				self.contacts[message.sender_id] = User(
+					id=message.sender_id,
+					firstname=sender_name,
+					lastname='',
+					status=0,
+					update_time=0
+				)
+				message._sender = self.contacts[message.sender_id]
 
 		if message.status == MessageStatus.REMOVED:
 			for handler in self.on_message_removed_handlers:
@@ -134,7 +141,7 @@ class WebsocketMixin:
 			try:
 				await self.ping()
 				consecutive_failures = 0
-				await asyncio.sleep(60)
+				await asyncio.sleep(30)
 			except asyncio.CancelledError:
 				break
 			except Exception as e:
@@ -191,7 +198,6 @@ class WebsocketMixin:
 				del self._response_waiters[expected_seq]
 			raise
 		except Exception as e:
-			# Любая другая ошибка (таймаут и т.п.)
 			if expected_seq in self._response_waiters:
 				del self._response_waiters[expected_seq]
 			raise

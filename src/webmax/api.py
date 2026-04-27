@@ -319,6 +319,16 @@ class ApiMixin():
 		response_payload = await self._send_call(opcode=Opcode.VIDEO_PLAY, payload=payload)
 		return response_payload
 
+	async def get_file_url(self, file_id: int, chat_id: int, message_id: str) -> str | None:
+		"""Получить прямую ссылку на файл по его ID, chat_id и message_id."""
+		payload = {
+			"fileId": file_id,
+			"chatId": chat_id,
+			"messageId": message_id
+		}
+		response_payload = await self._send_call(opcode=Opcode.FILE_DOWNLOAD, payload=payload)
+		return response_payload.get("url")
+
 	async def close_all_sessions(self, save_token: bool = True) -> bool:
 		response_payload = await self._send_call(
 			opcode=Opcode.SESSIONS_CLOSE,

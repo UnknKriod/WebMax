@@ -57,6 +57,11 @@ class WebMaxClient(ApiMixin, AuthMixin, WebsocketMixin, HandlersMixin):
             self.rate_limiters[opcode] = RateLimiter(limit)
         self.default_rate_limiter = RateLimiter(DEFAULT_RATE_LIMIT)
 
+        self._pending_contact_requests = set()
+        self._contact_request_lock = asyncio.Lock()
+        self._contact_request_task = None
+        self._contact_batch_delay = 0.5
+
     async def start(self, device_name: str = 'Chrome', device_version: str = 'Linux'):
         '''
         Запускает клиент, подключается к вебсокету, авторизирует
@@ -115,3 +120,40 @@ class WebMaxClient(ApiMixin, AuthMixin, WebsocketMixin, HandlersMixin):
             for task in self._tasks:
                 task.cancel()
             await asyncio.gather(*self._tasks, return_exceptions=True)
+
+    async def get_user_name(self, user_id: int) -> str:
+        if user_id in self.contacts:
+            user = self.contacts[user_id]
+            return f"{user.firstname} {user.lastname}".strip()
+
+        async with self._contact_request_lock:
+            self._pending_contact_requests.add(user_id)
+
+        if self._contact_request_task is None or self._contact_request_task.done():
+            self._contact_request_task = asyncio.create_task(self._process_contact_requests())
+
+        # Ждём, пока контакт появится в кэше
+        timeout = 5.0
+        start = asyncio.get_event_loop().time()
+        while user_id not in self.contacts:
+            await asyncio.sleep(0.05)
+            if asyncio.get_event_loop().time() - start > timeout:
+                return f"User {user_id}"
+
+        user = self.contacts[user_id]
+        return f"{user.firstname} {user.lastname}".strip()
+
+    async def _process_contact_requests(self):
+        """раз в batch_delay секунд отправляет накопленные ID."""
+        while True:
+            await asyncio.sleep(self._contact_batch_delay)
+            async with self._contact_request_lock:
+                if not self._pending_contact_requests:
+                    continue
+                ids_to_fetch = list(self._pending_contact_requests)
+                self._pending_contact_requests.clear()
+            try:
+                await self.get_contacts_info(ids_to_fetch)
+                print(f"📇 Запрошены контакты: {ids_to_fetch}")
+            except Exception as e:
+                print(f"⚠️ Ошибка запроса контактов: {e}")

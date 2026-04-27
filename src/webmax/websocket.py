@@ -62,15 +62,6 @@ class WebsocketMixin:
 					await self.notif_message(payload)
 				elif opcode == Opcode.NOTIF_CHAT_ACTION:
 					await self.notif_chat_action(payload)
-				elif opcode == Opcode.PING:
-					await self.websocket.send(json.dumps({
-						'ver': self.ver,
-						'cmd': 0,
-						'seq': self.seq,
-						'opcode': Opcode.PING,
-						'payload': payload
-					}))
-					self.seq += 1
 			except asyncio.TimeoutError:
 				continue
 			except asyncio.CancelledError:
